@@ -15,15 +15,19 @@ user_name = 'julien'
 host = 'localhost'
 pwd = 'rr33'
 scheme_name = 'public'
+table_name_in = "tracts_sb"
 output_table_name = 'tracts_sb_dots'
-SRID = "4269"
+SRID = 4269
 ratio_pop = 100
  
-def query_postgis(sql_string):
+def query_postgis(sql_string, data=None):
     #Create the cursor
     cur = conn.cursor()
     # execute the query
-    cur.execute(sql_string)
+    if data:
+        cur.execute(sql_string, data)
+    else:
+        cur.execute(sql_string)
     # store the result of the query into Tuple
     rows = cur.fetchall()
     # closes the connection
@@ -57,29 +61,30 @@ def insert_many(value_dict):
     conn.commit()
     cur.close()
     
-    
-    '''namedict = ({"first_name":"Joshua", "last_name":"Drake"},
-                {"first_name":"Steven", "last_name":"Foo"},
-                {"first_name":"David", "last_name":"Bar"})
-    You could easily insert all three rows within the dictionary by using:
-    cur = conn.cursor()
-    cur.executemany("""INSERT INTO bar(first_name,last_name) VALUES (%(first_name)s, %(last_name)s)""", value_dict)'''
-    
 
 def point_generator(nbr_dots, lg_min, lg_max, la_min, la_max):
     point_dict = {}
     if nbr_dots < 1:
         point_dict = None
     else:
-        for i in range(nbr_dots):
+        i = nbr_dots
+        while i > 0:
+        #for i in range(nbr_dots):
             #Create the point from a uniform distribution 
             sample_point = (uniform(long_min, long_max),uniform(lat_min, lat_max))
-            #Check if the point is in possible are
-            #Check if the point already exist
-            #Add the point to the dictionary
-            #point_dict[i] = """ST_GeomFromText('POINT(%s %s)', %s)""" %(sample_point[0], sample_point[1], SRID)
-            point_dict[i] = "POINT(%s %s)" %(sample_point[0], sample_point[1])
-            #point_dict[i] = "ST_SetSRID(ST_MakePoint(%s, %s),%s)" %(sample_point[0], sample_point[1], SRID)
+            #Check if the point is within the tract:
+            query_test_in = """SELECT ST_WITHIN(ST_GeomFromText('POINT(%(lat)s %(lon)s)', %(SRID)s), %(field_geom)s) FROM %(table)s WHERE %(field_id)s = %(value_id)s;"""
+            #SELECT ST_WITHIN(ST_GeomFromText('POINT(34.42 -119.82)', 4269),tracts_sb.geom) from tracts_sb WHERE geoid10 = '06083980000';
+            data_test_in = {'lat':sample_point[0], 'lon':sample_point[1], 'SRID':SRID, 'table':table_name_in,'field_geom':"%s.geom" %(table_name_in), 'field_id': "geoid10", 'value_id': "'"+dict_row['geoid']+"'"}
+            query = query_test_in % data_test_in
+            test = query_postgis(query)
+            if test[0][0] is True:
+                #Add the point location to the dictionary
+                point_dict[i] = "POINT(%s %s)" %(sample_point[0], sample_point[1])
+                #Update the dot count
+                i = i-1
+            else:
+                continue
     #return the dictionary to main 
     return point_dict
 
@@ -98,7 +103,7 @@ except:
 fields = ('gid SERIAL PRIMARY KEY', 'geoid character varying(11)', 'namelsad character varying(20)', 'geom geometry(Point,4269)')
 create_table(fields)
 
-query = "SELECT gid, geoid10, namelsad10, dp0010001/%s AS nbr_dots, BOX2D(geom) as BBOX from public.tracts_SB;" % ratio_pop
+query = "SELECT gid, geoid10, namelsad10, dp0010001/%s AS nbr_dots, BOX2D(geom) as BBOX from %s.%s;" %(ratio_pop, scheme_name, table_name_in)
 data_all = query_postgis(query)
 data_dict = {}
 for data in data_all:
