@@ -24,7 +24,8 @@ table_name_in = "tracts_sb"
 output_table_name = 'tracts_sb_dots'
 SRID = 4269
 ratio_pop = 100
-
+fields = {'gid':'SERIAL PRIMARY KEY', 'geoid':'character varying(11)', 'namelsad':'character varying(20)', 'geom':'geometry(Point,4269)'}
+fields_insert = ['geoid','namelsad','geom']
 #====================================================
 
 class Postgis:
@@ -37,8 +38,7 @@ class Postgis:
         except:
             print "I am unable to connect to the database"
             sys.exit()
-
-        
+       
     def close_connection(self):
         '''close the db connection'''
         #close the connection
@@ -60,12 +60,15 @@ class Postgis:
         #return the data
         return rows
     
-    def create_table(self, scheme, output_table, fields):
+    def create_table(self, scheme, output_table, fields_dict):
         '''creates a postgis table'''
         #Create the query
         sql_create = "CREATE TABLE %s.%s (" %(scheme, output_table)
-        sql_fields = ", ".join(fields)
-        sql_owner = ") WITH (OIDS=FALSE); ALTER TABLE public.%s OWNER TO julien; CREATE INDEX ind_geom_point ON public.tracts_sb_dots USING gist(geom);" %(output_table)
+        sql_fields_l =[]
+        for k,v in fields_dict.iteritems():
+            sql_fields_l.append(k +" "+ v)
+        sql_fields = ",".join(sql_fields_l)
+        sql_owner = ") WITH (OIDS=FALSE); ALTER TABLE %s.%s OWNER TO julien; CREATE INDEX ind_geom_point ON %s.%s USING gist(geom);" %(scheme, output_table, scheme, output_table) #to be improved
         sql_query = ''.join([sql_create,sql_fields,sql_owner])
         #Execute the query
         cur = self.conn.cursor()
@@ -79,10 +82,14 @@ class Postgis:
         self.conn.commit()
         cur.close()
     
-    def insert_many(self, value_dict):
+    def insert_many(self, table, fields_list, value_dict):
         '''insert a bulk of rows into a table'''  
         cur = self.conn.cursor()
-        cur.executemany("""INSERT INTO tracts_SB_dots(geoid,namelsad,geom) VALUES (%(geoid)s, %(tract_name)s, ST_GeomFromText(%(geom)s, 4269))""", value_dict)
+        sql_fields = ", ".join(fields_list)
+        sql_query_p1 = """INSERT INTO %s(%s) VALUES """ %(table, sql_fields)
+        sql_query_p2 = """(%(geoid)s, %(tract_name)s, ST_GeomFromText(%(geom)s, 4269))"""
+        sql_query = sql_query_p1 + sql_query_p2
+        cur.executemany(sql_query, value_dict)
         #cur.execute("INSERT INTO tracts_SB_dots(geoid,namelsad,geom) VALUES ('123','dede',ST_SetSRID(ST_MakePoint(-119.880634657, 34.4170923867),4269));")
         self.conn.commit()
         cur.close()
@@ -124,7 +131,6 @@ if __name__=='__main__':
     pg_conn = Postgis(db_name, host, user_name, pwd)
     
     # create output table
-    fields = ('gid SERIAL PRIMARY KEY', 'geoid character varying(11)', 'namelsad character varying(20)', 'geom geometry(Point,4269)')
     pg_conn.create_table(scheme_name, output_table_name, fields)
     
     query = "SELECT gid, geoid10, namelsad10, dp0010001/%s AS nbr_dots, BOX2D(geom) as BBOX from %s.%s;" %(ratio_pop, scheme_name, table_name_in)
@@ -153,7 +159,7 @@ if __name__=='__main__':
                 data_insert.append(dict_row.copy())
             
             #Insert the rows into the PostGIS table
-            pg_conn.insert_many(tuple(data_insert))
+            pg_conn.insert_many(output_table_name, fields_insert, tuple(data_insert))
     
     #close the connection
     pg_conn.close_connection()
