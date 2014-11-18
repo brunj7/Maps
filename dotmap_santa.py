@@ -1,13 +1,18 @@
 '''
 Created on Nov 4, 2014
+This script creates a dot map from census tract data, where each dot represents a certain number of persons, using PostGIS. The final goal is to improve
+the dot repartition using open street map to limit dots into residential areas.
+Original visualization: http://www.coopercenter.org/demographics/Racial-Dot-Map
 
-@author: julien
+@author: JBrun
 '''
+
 # import modules
 import sys
 import psycopg2
 from random import uniform
 #import matplotlib.pyplot as plt
+
 
 #Constants
 db_name = 'julien'
@@ -19,8 +24,11 @@ table_name_in = "tracts_sb"
 output_table_name = 'tracts_sb_dots'
 SRID = 4269
 ratio_pop = 100
+
+#====================================================
  
 def query_postgis(sql_string, data=None):
+    '''query a postgis table'''
     #Create the cursor
     cur = conn.cursor()
     # execute the query
@@ -36,12 +44,12 @@ def query_postgis(sql_string, data=None):
     return rows
 
 def create_table(field_tuple):
+    '''creates a postgis table'''
     #Create the query
     sql_create = "CREATE TABLE %s.%s (" %(scheme_name, output_table_name)
     sql_fields = ", ".join(field_tuple)
     sql_owner = ") WITH (OIDS=FALSE); ALTER TABLE public.%s OWNER TO julien; CREATE INDEX ind_geom_point ON public.tracts_sb_dots USING gist(geom);" %(output_table_name)
     sql_query = ''.join([sql_create,sql_fields,sql_owner])
-    
     #Execute the query
     cur = conn.cursor()
     try:
@@ -54,15 +62,16 @@ def create_table(field_tuple):
     conn.commit()
     cur.close()
 
-def insert_many(value_dict):  
+def insert_many(value_dict):
+    '''insert a bulk of rows into a table'''  
     cur = conn.cursor()
     cur.executemany("""INSERT INTO tracts_SB_dots(geoid,namelsad,geom) VALUES (%(geoid)s, %(tract_name)s, ST_GeomFromText(%(geom)s, 4269))""", value_dict)
     #cur.execute("INSERT INTO tracts_SB_dots(geoid,namelsad,geom) VALUES ('123','dede',ST_SetSRID(ST_MakePoint(-119.880634657, 34.4170923867),4269));")
     conn.commit()
     cur.close()
-    
 
-def point_generator(nbr_dots, lg_min, lg_max, la_min, la_max):
+def point_generator(nbr_dots, lg_min, lg_max, la_min, la_max, polyg_id):
+    '''generates random (lat,long) locations within a specific polygon''' 
     point_dict = {}
     if nbr_dots < 1:
         point_dict = None
@@ -75,7 +84,7 @@ def point_generator(nbr_dots, lg_min, lg_max, la_min, la_max):
             #Check if the point is within the tract:
             query_test_in = """SELECT ST_WITHIN(ST_GeomFromText('POINT(%(lat)s %(lon)s)', %(SRID)s), %(field_geom)s) FROM %(table)s WHERE %(field_id)s = %(value_id)s;"""
             #SELECT ST_WITHIN(ST_GeomFromText('POINT(34.42 -119.82)', 4269),tracts_sb.geom) from tracts_sb WHERE geoid10 = '06083980000';
-            data_test_in = {'lat':sample_point[0], 'lon':sample_point[1], 'SRID':SRID, 'table':table_name_in,'field_geom':"%s.geom" %(table_name_in), 'field_id': "geoid10", 'value_id': "'"+dict_row['geoid']+"'"}
+            data_test_in = {'lat':sample_point[0], 'lon':sample_point[1], 'SRID':SRID, 'table':table_name_in,'field_geom':"%s.geom" %(table_name_in), 'field_id': "geoid10", 'value_id': "'"+polyg_id+"'"}
             query = query_test_in % data_test_in
             test = query_postgis(query)
             if test[0][0] is True:
@@ -91,46 +100,46 @@ def point_generator(nbr_dots, lg_min, lg_max, la_min, la_max):
 
 #==========================================================================================================
 
-
-# create connection to database
-try:
-    conn = psycopg2.connect("dbname= %s host=%s user=%s password=%s" %(db_name, host, user_name, pwd))   
-except:
-    print "I am unable to connect to the database"
-    exit
-
-# create output table
-fields = ('gid SERIAL PRIMARY KEY', 'geoid character varying(11)', 'namelsad character varying(20)', 'geom geometry(Point,4269)')
-create_table(fields)
-
-query = "SELECT gid, geoid10, namelsad10, dp0010001/%s AS nbr_dots, BOX2D(geom) as BBOX from %s.%s;" %(ratio_pop, scheme_name, table_name_in)
-data_all = query_postgis(query)
-data_dict = {}
-for data in data_all:
-    dict_row = {}
-    #Get the tract ids:
-    dict_row['keyid'] = data[0]
-    dict_row['geoid'] = data[1]
-    dict_row['tract_name'] = data[2]
-    dict_row['dots_number'] = int(data[3])
-    #Get the bounding box
-    bbox = data[4][4:-1]
-    corners = bbox.split(',')
-    long_min,lat_min = map(float,corners[0].split(' '))
-    long_max,lat_max = map(float,corners[1].split(' '))
-    #Generate the point coordinates
-    points = point_generator(dict_row['dots_number'], long_min, long_max, lat_min, lat_max)
+if __name__=='__main__':
+    # create connection to database
+    try:
+        conn = psycopg2.connect("dbname= %s host=%s user=%s password=%s" %(db_name, host, user_name, pwd))   
+    except:
+        print "I am unable to connect to the database"
+        exit
     
-    if points:
-        #Create the dictionary tuple for the insertion
-        data_insert = []
-        for v in points.itervalues():
-            dict_row['geom'] = v
-            data_insert.append(dict_row.copy())
+    # create output table
+    fields = ('gid SERIAL PRIMARY KEY', 'geoid character varying(11)', 'namelsad character varying(20)', 'geom geometry(Point,4269)')
+    create_table(fields)
+    
+    query = "SELECT gid, geoid10, namelsad10, dp0010001/%s AS nbr_dots, BOX2D(geom) as BBOX from %s.%s;" %(ratio_pop, scheme_name, table_name_in)
+    data_all = query_postgis(query)
+    data_dict = {}
+    for data in data_all:
+        dict_row = {}
+        #Get the tract ids:
+        dict_row['keyid'] = data[0]
+        dict_row['geoid'] = data[1]
+        dict_row['tract_name'] = data[2]
+        dict_row['dots_number'] = int(data[3])
+        #Get the bounding box
+        bbox = data[4][4:-1]
+        corners = bbox.split(',')
+        long_min,lat_min = map(float,corners[0].split(' '))
+        long_max,lat_max = map(float,corners[1].split(' '))
+        #Generate the point coordinates
+        points = point_generator(dict_row['dots_number'], long_min, long_max, lat_min, lat_max, dict_row['geoid'])
         
-        #data_dict[data[0]] = 
-        insert_many(tuple(data_insert))
-
-#close the connection
-conn.close()
-print "All Done!"
+        if points:
+            #Create the dictionary tuple for the insertion
+            data_insert = []
+            for v in points.itervalues():
+                dict_row['geom'] = v
+                data_insert.append(dict_row.copy())
+            
+            #Insert the rows into the PostGIS table
+            insert_many(tuple(data_insert))
+    
+    #close the connection
+    conn.close()
+    print "All Done!"
