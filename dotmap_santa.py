@@ -87,7 +87,7 @@ class Postgis:
         cur = self.conn.cursor()
         sql_fields = ", ".join(fields_list)
         sql_query_p1 = """INSERT INTO %s(%s) VALUES """ %(table, sql_fields)
-        sql_query_p2 = """(%(geoid)s, %(tract_name)s, ST_GeomFromText(%(geom)s, 4269))"""
+        sql_query_p2 = """(%(geoid)s, %(tract_name)s, ST_GeomFromText(%(geom)s, 4269))""" % value_dict
         sql_query = sql_query_p1 + sql_query_p2
         cur.executemany(sql_query, value_dict)
         #cur.execute("INSERT INTO tracts_SB_dots(geoid,namelsad,geom) VALUES ('123','dede',ST_SetSRID(ST_MakePoint(-119.880634657, 34.4170923867),4269));")
